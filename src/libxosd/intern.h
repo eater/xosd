@@ -26,6 +26,14 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/shape.h>
 #include <X11/Xatom.h>
+
+/*For pango xft support*/
+#include <X11/Xft/Xft.h>
+#include <pango/pango.h>
+#include <pango/pangoxft.h>
+#include <pango/pango-font.h>
+#include <locale.h>
+
 #ifdef HAVE_XINERAMA
 #  include <X11/extensions/Xinerama.h>
 #endif
@@ -71,7 +79,6 @@ union xosd_line
     enum LINE type;
     int width;
     char *string;
-    XRectangle bbox_extents;
   } text;
   struct xosd_bar {
     enum LINE type;
@@ -120,10 +127,6 @@ struct xosd
   int outline_offset;           /* CONF */
   XColor outline_colour;        /* CONF */
   unsigned long outline_pixel;  /* CACHE (outline_colour) */
-  int bbox_offset;              /* CONF */
-  XColor bbox_colour;           /* CONF */
-  unsigned long bbox_pixel;     /* CACHE (bbox_colour) */
-  int margin;                   /* CACHE (outline_offset,bbox_offset) */
   int bar_length;               /* CONF */
 
   int generation;               /* DYN count of map/unmap */
@@ -149,6 +152,28 @@ struct xosd
 
   int timeout;                  /* CONF delta time */
   struct timeval timeout_start; /* DYN Absolute start of timeout */
+
+/*For pango xft support*/
+//  XftColor  xftnorm[ColLast];
+  XftColor  xftcolour;
+  XftColor  outline_xftcolour;
+  XftColor  shadow_xftcolour;
+  XftColor * draw_xftcolour;
+  enum {
+    XOSD_XFT_NORM = 0,
+    XOSD_XFT_OUTLINE,
+    XOSD_XFT_SHADOW,
+  } xft_font_colour;
+  XftDraw  *xftdrawable;
+  XftDraw  *xftdrawable_msk;
+  PangoContext *pgc;
+  PangoLayout  *plo;
+  PangoFontDescription *pfd;
+  int xftascent;
+  int xftdescent;
+  int xftheight;
+  int x;
+  int y;
 };
 
 static const int XOSD_MAX_PRINTF_BUF_SIZE=2000;

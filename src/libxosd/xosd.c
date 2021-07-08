@@ -1,23 +1,21 @@
 /*
- * XOSD - X On-Screen Display library
- *
- * Copyright (C) 2000-2002 Andre Renaud <andre@ignavus.net>
- * Copyright (C) 2002-2005 Tim Wright <tim@ignavus.net>
- * Copyright (C) 2005-2006 Philipp Hahn <pmhahn@debian.org>
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * XOSD
+ * 
+ * Copyright (c) 2000 Andre Renaud (andre@ignavus.net)
+ * 
+ * This program is free software; you can redistribute it and/or modify it 
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License along 
+ * with this program; if not, write to the Free Software Foundation, Inc., 
+ * 675 Mass Ave, Cambridge, MA 02139, USA. 
  */
 #include "intern.h"
 
@@ -25,19 +23,20 @@
 #define SLIDER_SCALE_ON 0.7
 #define XOFFSET 10
 
-const char * const osd_default_font =
-  "-misc-fixed-medium-r-semicondensed--*-*-*-*-c-*-*-*";
+const char *osd_default_font =
+  "Sans 8";
+/*  "-misc-fixed-medium-r-semicondensed--*-*-*-*-c-*-*-*";*/
 #if 0
 "-adobe-helvetica-bold-r-*-*-10-*";
 #endif
-const char * const osd_default_colour = "green";
+const char *osd_default_colour = "green";
+
+const char *osd_default_shadow_colour = "black";
+
+const char *osd_default_outline_colour = "black";
 
 /** Global error string. */
-const char *xosd_error;
-
-/** Helper function. */
-static int MIN(const int a, const int b) { return a < b ? a : b; }
-static int MAX(const int a, const int b) { return a > b ? a : b; }
+char *xosd_error;
 
 /* Wait until display is in next state. {{{ */
 static void
@@ -51,6 +50,28 @@ _wait_until_update(xosd * osd, int generation)
   pthread_mutex_unlock(&osd->mutex_sync);
 }
 
+
+static Pixmap
+take_snapshot(xosd *osd) {
+  Pixmap pixmap;
+  GC gc;
+
+  /* create a pixmap to hold the screenshot. */
+  pixmap = XCreatePixmap(osd->display, osd->window,
+                         osd->screen_width, osd->height,
+                         osd->depth);
+
+  /* then copy the screen into the pixmap. */
+  gc = XCreateGC(osd->display, pixmap, 0, NULL);
+  XSetSubwindowMode(osd->display, gc, IncludeInferiors);
+  XCopyArea(osd->display, DefaultRootWindow(osd->display), pixmap, gc,
+            osd->x, osd->y, osd->screen_width, osd->height,
+            0, 0);
+  XSetSubwindowMode(osd->display, gc, ClipByChildren);
+  XFreeGC(osd->display, gc);
+
+  return pixmap;
+}
 /* }}} */
 
 /* Serialize access to the X11 connection. {{{
@@ -116,7 +137,7 @@ _draw_bar(xosd * osd, int nbars, int on, XRectangle * p, XRectangle * mod,
   rs[1].height = mod->height + p->height;
   for (i = 0; i < nbars; i++, rs[0].x = rs[1].x += p->width) {
     XRectangle *r = &(rs[is_slider ? (i == on) : (i < on)]);
-    XFillRectangles(osd->display, osd->mask_bitmap, osd->mask_gc, r, 1);
+//    XFillRectangles(osd->display, osd->mask_bitmap, osd->mask_gc, r, 1);
     XFillRectangles(osd->display, osd->line_bitmap, osd->gc, r, 1);
   }
   FUNCTION_END(Dfunction);
@@ -128,10 +149,11 @@ draw_bar(xosd * osd, int line)
   int is_slider = l->type == LINE_slider, nbars, on;
   XRectangle p, m;
   p.x = XOFFSET;
-  p.y = osd->line_height * line + osd->margin;
-  p.width = -osd->extent->y / 2;
-  p.height = -osd->extent->y;
-
+  p.y = osd->line_height * line;
+//  p.width = -osd->extent->y / 2;
+//  p.height = -osd->extent->y;
+  p.width = osd->xftheight / 2;
+  p.height =  osd->xftheight;
   assert(osd);
   FUNCTION_START(Dfunction);
 
@@ -163,27 +185,18 @@ draw_bar(xosd * osd, int line)
 
   DEBUG(Dvalue, "percent=%d, nbars=%d, on=%d", l->value, nbars, on);
 
-  /* Bounding Box */
-  if (osd->bbox_offset) {
-    /* We fake the bounding box by pretending this is a percentage set to 100%
-     * and just drawing an outline. */
-    m.x = m.y = -osd->bbox_offset;
-    m.width = m.height = 2 * osd->bbox_offset;
-    XSetForeground(osd->display, osd->gc, osd->bbox_pixel);
-    _draw_bar(osd, nbars, nbars, &p, &m, 0);
+  /* Outline */
+  if (osd->outline_offset) {
+    m.x = m.y = -osd->outline_offset;
+    m.width = m.height = 2 * osd->outline_offset;
+    XSetForeground(osd->display, osd->gc, osd->outline_pixel);
+    _draw_bar(osd, nbars, on, &p, &m, is_slider);
   }
   /* Shadow */
   if (osd->shadow_offset) {
     m.x = m.y = osd->shadow_offset;
     m.width = m.height = 0;
     XSetForeground(osd->display, osd->gc, osd->shadow_pixel);
-    _draw_bar(osd, nbars, on, &p, &m, is_slider);
-  }
-  /* Outline */
-  if (osd->outline_offset) {
-    m.x = m.y = -osd->outline_offset;
-    m.width = m.height = 2 * osd->outline_offset;
-    XSetForeground(osd->display, osd->gc, osd->outline_pixel);
     _draw_bar(osd, nbars, on, &p, &m, is_slider);
   }
   /* Bar/Slider */
@@ -196,22 +209,46 @@ draw_bar(xosd * osd, int line)
 
 /* }}} */
 
+ void 
+set_xft_font_colour(xosd * osd, int ind)
+{
+  switch (ind) {
+  case XOSD_XFT_NORM:
+    osd->draw_xftcolour= & (osd ->xftcolour);
+    break;
+  case XOSD_XFT_OUTLINE:
+    osd->draw_xftcolour = & (osd->outline_xftcolour);
+    break;
+  case XOSD_XFT_SHADOW:
+    osd->draw_xftcolour = & (osd->shadow_xftcolour);
+    break;
+  }
+}
+
+
 /* Draw text. {{{ */
 static void                     /*inline */
 _draw_text(xosd * osd, char *string, int x, int y)
 {
   int len = strlen(string);
   FUNCTION_START(Dfunction);
-  XmbDrawString(osd->display, osd->mask_bitmap, osd->fontset, osd->mask_gc, x,
-                y, string, len);
-  XmbDrawString(osd->display, osd->line_bitmap, osd->fontset, osd->gc, x, y,
-                string, len);
+//  XmbDrawString(osd->display, osd->mask_bitmap, osd->fontset, osd->mask_gc, x,
+//                y, string, len);
+//  XmbDrawString(osd->display, osd->line_bitmap, osd->fontset, osd->gc, x, y,
+//                string, len);
+
+pango_layout_set_text(osd->plo, string, len);
+pango_xft_render_layout(osd->xftdrawable, osd->draw_xftcolour, osd->plo, x * PANGO_SCALE, y * PANGO_SCALE);
+//pango_xft_render_layout(osd->xftdrawable, &osd->xftcolour, osd->plo, x * PANGO_SCALE, y * PANGO_SCALE);
+
   FUNCTION_END(Dfunction);
 }
+
 static void
 draw_text(xosd * osd, int line)
 {
-  int x = XOFFSET, y = osd->line_height * line - osd->extent->y + osd->margin;
+//  int x = XOFFSET, y = osd->line_height * line - osd->extent->y;
+  int x = XOFFSET, y = osd->line_height * line ;//- osd->xftdescent;
   struct xosd_text *l = &osd->lines[line].text;
 
   assert(osd);
@@ -221,15 +258,17 @@ draw_text(xosd * osd, int line)
     return;
 
   if (l->width < 0) {
+/*
     XRectangle rect;
-    XmbTextExtents(osd->fontset, l->string, strlen(l->string),
-        &l->bbox_extents, &rect);
-    // Define this to draw the bounding box around the physical (ink) extent
-    // of the text.  By default, draw around the logical extent.
-#ifndef BBOX_USES_INK_EXTENTS
-    l->bbox_extents = rect;
-#endif
+    XmbTextExtents(osd->fontset, l->string, strlen(l->string), NULL, &rect);
     l->width = rect.width;
+*/
+/*Pango XFT support*/
+    PangoRectangle r;
+    pango_layout_set_text(osd->plo, l->string, strlen(l->string));
+    pango_layout_get_extents(osd->plo, &r, 0);
+    l->width= r.width / PANGO_SCALE;
+
   }
 
   switch (osd->align) {
@@ -242,38 +281,26 @@ draw_text(xosd * osd, int line)
     break;
   }
 
-  /* Bounding Box */
-  if (osd->bbox_offset) {
-    XSetForeground(osd->display, osd->gc, osd->bbox_pixel);
-    XFillRectangle(osd->display, osd->mask_bitmap, osd->mask_gc,
-        x + l->bbox_extents.x - osd->bbox_offset,
-        y + l->bbox_extents.y - osd->bbox_offset,
-        l->bbox_extents.width  + 2*(osd->bbox_offset),
-        l->bbox_extents.height + 2*(osd->bbox_offset));
-    XFillRectangle(osd->display, osd->line_bitmap, osd->gc,
-        x + l->bbox_extents.x - osd->bbox_offset,
-        y + l->bbox_extents.y - osd->bbox_offset,
-        l->bbox_extents.width  + 2*(osd->bbox_offset),
-        l->bbox_extents.height + 2*(osd->bbox_offset));
-  }
-  /* Shadow */
   if (osd->shadow_offset) {
     XSetForeground(osd->display, osd->gc, osd->shadow_pixel);
+    set_xft_font_colour(osd, XOSD_XFT_SHADOW);    
     _draw_text(osd, l->string, x + osd->shadow_offset,
                y + osd->shadow_offset);
   }
-  /* Outline */
   if (osd->outline_offset) {
-    int xd,yd;
+    int i, j;
     XSetForeground(osd->display, osd->gc, osd->outline_pixel);
-    for (xd = -osd->outline_offset; xd <= osd->outline_offset; xd++)
-      for (yd = -osd->outline_offset; yd <= osd->outline_offset; yd++)
-        if (xd || yd)
-          _draw_text(osd, l->string, x + xd, y + yd);
+    set_xft_font_colour(osd, XOSD_XFT_OUTLINE);
+    /* FIXME: echo . | osd_cat -O 50 -p middle -A center */
+    for (i = 1; i <= osd->outline_offset; i++)
+      for (j = 0; j < 9; j++)
+        if (j != 4)
+          _draw_text(osd, l->string, x + (j / 3 - 1) * i,
+                     y + (j % 3 - 1) * i);
   }
-  /* Text */
   if (1) {
     XSetForeground(osd->display, osd->gc, osd->pixel);
+    set_xft_font_colour(osd, XOSD_XFT_NORM);
     _draw_text(osd, l->string, x, y);
   }
 }
@@ -301,7 +328,7 @@ event_loop(void *osdv)
   assert(osd);
 
   xfd = ConnectionNumber(osd->display);
-  max = MAX(osd->pipefd[0], xfd);
+  max = (osd->pipefd[0] > xfd) ? osd->pipefd[0] : xfd;
 
   pthread_mutex_lock(&osd->mutex);
   DEBUG(Dtrace, "Request exposure events");
@@ -327,11 +354,16 @@ event_loop(void *osdv)
     /* The font, outline or shadow was changed. Recalculate line height,
      * resize window and bitmaps. */
     if (osd->update & UPD_size) {
+/*
       XFontSetExtents *extents = XExtentsOfFontSet(osd->fontset);
       DEBUG(Dupdate, "UPD_size");
       osd->extent = &extents->max_logical_extent;
       osd->line_height = osd->extent->height + osd->shadow_offset + 2 *
-        osd->margin;
+        osd->outline_offset;*/
+      osd->line_height = osd->xftheight  + osd->shadow_offset + 2 *
+        osd->outline_offset;
+
+
       osd->height = osd->line_height * osd->number_lines;
       for (line = 0; line < osd->number_lines; line++)
         if (osd->lines[line].type == LINE_text)
@@ -339,13 +371,32 @@ event_loop(void *osdv)
 
       XResizeWindow(osd->display, osd->window, osd->screen_width,
                     osd->height);
-      XFreePixmap(osd->display, osd->mask_bitmap);
-      osd->mask_bitmap = XCreatePixmap(osd->display, osd->window,
-                                       osd->screen_width, osd->height, 1);
+//      XFreePixmap(osd->display, osd->mask_bitmap);
+//      osd->mask_bitmap = XCreatePixmap(osd->display, osd->window,
+ //                                      osd->screen_width, osd->height, 1);
       XFreePixmap(osd->display, osd->line_bitmap);
       osd->line_bitmap = XCreatePixmap(osd->display, osd->window,
                                        osd->screen_width, osd->height,
                                        osd->depth);
+  xosd_xypos(osd);
+  //printf("osd->screen_width=%d,osd->height=%d,osd->x=%d,osd->y=%d\n",osd->screen_width,osd->height,osd->x,osd->y);
+
+  XCopyArea(osd->display, take_snapshot(osd), osd->line_bitmap, osd->gc,
+             0, 0, osd->screen_width, osd->height, 0, 0);
+
+
+  //printf("osd->screen_width=%d, osd->height=%d\n",osd->screen_width, osd->height);
+/*BEGIN For pango XFT support*/
+//osd->xftdrawable_msk = XftDrawCreate(osd->display, osd->mask_bitmap, osd->visual, DefaultColormap(osd->display, osd->screen));
+//if(!osd->xftdrawable_msk)
+//   printf("error, cannot create drawable_msk\n");
+
+  osd->xftdrawable = XftDrawCreate(osd->display, osd->line_bitmap, osd->visual, DefaultColormap(osd->display, osd->screen));
+  if(!osd->xftdrawable)
+    printf("error, cannot create drawable\n");
+/*END*/
+
+
     }
     /* H/V offset or vertical positon was changed. Horizontal alignment is
      * handles internally as line realignment with UPD_content. */
@@ -370,6 +421,7 @@ event_loop(void *osdv)
       case XOSD_top:
         y = osd->voffset;
       }
+      osd->x=x; osd->y=y;
       XMoveWindow(osd->display, osd->window, x, y);
     }
     /* If the content changed, redraw lines in background buffer.
@@ -383,10 +435,10 @@ event_loop(void *osdv)
         XFillRectangle(osd->display, osd->line_bitmap, osd->gc, 0,
                        y, osd->screen_width, osd->line_height);
 #endif
-        if (osd->update & UPD_mask) {
-          XFillRectangle(osd->display, osd->mask_bitmap, osd->mask_gc_back, 0,
-                         y, osd->screen_width, osd->line_height);
-        }
+        //if (osd->update & UPD_mask) {
+        //  XFillRectangle(osd->display, osd->mask_bitmap, osd->mask_gc_back, 0,
+        //                 y, osd->screen_width, osd->line_height);
+       // }
         switch (osd->lines[line].type) {
         case LINE_text:
           draw_text(osd, line);
@@ -401,11 +453,12 @@ event_loop(void *osdv)
     }
 #ifndef DEBUG_XSHAPE
     /* More than colours was changed, also update XShape. */
+/*
     if (osd->update & UPD_mask) {
       DEBUG(Dupdate, "UPD_mask");
       XShapeCombineMask(osd->display, osd->window, ShapeBounding, 0, 0,
                         osd->mask_bitmap, ShapeSet);
-    }
+    }*/
 #endif
     /* Show display requested. */
     if (osd->update & UPD_show) {
@@ -540,6 +593,19 @@ event_loop(void *osdv)
 
 /* }}} */
 
+ static int parse_xft_colour(xosd * osd, XftColor * color, unsigned long *pixel, const char *colorstr){
+  Colormap cmap = DefaultColormap(osd->display, osd->screen);
+  int retval = 0;
+
+ if(!XftColorAllocName(osd->display, osd->visual, cmap, colorstr, color)){
+    printf("error, cannot allocate color '%s'\n", colorstr);
+    retval = -1;
+  } else
+    retval = 0;
+  *pixel = color->pixel;
+  return retval;
+ }
+
 /* Parse textual colour value. {{{ */
 static int
 parse_colour(xosd * osd, XColor * col, unsigned long *pixel,
@@ -575,7 +641,7 @@ parse_colour(xosd * osd, XColor * col, unsigned long *pixel,
 /* }}} */
 
 /* Tell window manager to put window topmost. {{{ */
-static void
+void
 stay_on_top(Display * dpy, Window win)
 {
   Atom gnome, net_wm, type;
@@ -647,16 +713,39 @@ stay_on_top(Display * dpy, Window win)
   XRaiseWindow(dpy, win);
 }
 
-/* }}} */
-
+ /* }}} */
+void xosd_xypos(xosd *osd)
+{
+  int x,y;
+      switch (osd->align) {
+      case XOSD_left:
+      case XOSD_center:
+        x = osd->screen_xpos + osd->hoffset;
+        break;
+      case XOSD_right:
+        x = osd->screen_xpos - osd->hoffset;
+      }
+      switch (osd->pos) {
+      case XOSD_bottom:
+        y = osd->screen_height - osd->height - osd->voffset;
+        break;
+      case XOSD_middle:
+        y = (osd->screen_height - osd->height) / 2 - osd->voffset;
+        break;
+      case XOSD_top:
+        y = osd->voffset;
+      }
+      //printf("in xosd_xypos x=%d, y=%d, osd->height =%d, osd->screen_height=%d, osd->voffset=%d \n",x,y,osd->height, osd->screen_height, osd->voffset);
+      osd->x=x; osd->y=y;
+}
 /* xosd_init -- Create a new xosd "object" {{{
  * Deprecated: Use xosd_create. */
 xosd *
 xosd_init(const char *font, const char *colour, int timeout, xosd_pos pos,
           int voffset, int shadow_offset, int number_lines)
 {
-  xosd *osd = xosd_create(number_lines);
 
+  xosd *osd = xosd_create(number_lines);
   FUNCTION_START(Dfunction);
   if (osd == NULL)
     return NULL;
@@ -667,30 +756,25 @@ xosd_init(const char *font, const char *colour, int timeout, xosd_pos pos,
      * we do not set xosd_error, as set_font has already set it to 
      * a sensible error message. 
      */
+    printf("xosd_set_font(osd, font) == -1\n");
     return NULL;
   }
+//  xosd_xypos(osd);
   xosd_set_colour(osd, colour);
   xosd_set_timeout(osd, timeout);
   xosd_set_pos(osd, pos);
   xosd_set_vertical_offset(osd, voffset);
   xosd_set_shadow_offset(osd, shadow_offset);
-
   return osd;
 }
 
 /* }}} */
 
+
+
 /* xosd_create -- Create a new xosd "object" {{{ */
 xosd *
 xosd_create(int number_lines)
-{
-  return xosd_create_xinerama(number_lines, -1);
-}
-
-
-/* xosd_create_xinerama -- Create a new xosd "object" allowing display selection  */
-xosd *
-xosd_create_xinerama(int number_lines, int xinerama_screen)
 {
   xosd *osd;
   int event_basep, error_basep, i;
@@ -702,7 +786,6 @@ xosd_create_xinerama(int number_lines, int xinerama_screen)
   int dummy_a, dummy_b;
   XineramaScreenInfo *screeninfo = NULL;
 #endif
-
   FUNCTION_START(Dfunction);
   DEBUG(Dtrace, "getting display");
   display = getenv("DISPLAY");
@@ -774,23 +857,22 @@ xosd_create_xinerama(int number_lines, int xinerama_screen)
 
   DEBUG(Dtrace, "font selection info");
   xosd_set_font(osd, osd_default_font);
-  if (osd->fontset == NULL) {
+  //if (osd->fontset == NULL) {
     /*
      * if we still don't have a fontset, then abort 
      */
-    xosd_error = "Default font not found";
-    goto error3;
-  }
+  //  xosd_error = "Default font not found";
+  //  goto error3;
+  //}
 
   DEBUG(Dtrace, "width and height initialization");
 #ifdef HAVE_XINERAMA
   if (XineramaQueryExtension(osd->display, &dummy_a, &dummy_b) &&
       (screeninfo = XineramaQueryScreens(osd->display, &screens)) &&
-      XineramaIsActive(osd->display) && xinerama_screen >= 0 &&
-      xinerama_screen < screens) {
-    osd->screen_width = screeninfo[xinerama_screen].width;
-    osd->screen_height = screeninfo[xinerama_screen].height;
-    osd->screen_xpos = screeninfo[xinerama_screen].x_org;
+      XineramaIsActive(osd->display)) {
+    osd->screen_width = screeninfo[0].width;
+    osd->screen_height = screeninfo[0].height;
+    osd->screen_xpos = screeninfo[0].x_org;
   } else
 #endif
   {
@@ -817,16 +899,22 @@ xosd_create_xinerama(int number_lines, int xinerama_screen)
                               CopyFromParent,
                               osd->visual, CWOverrideRedirect, &setwinattr);
   XStoreName(osd->display, osd->window, "XOSD");
-
+/*
   osd->mask_bitmap =
     XCreatePixmap(osd->display, osd->window, osd->screen_width,
-                  osd->height, 1);
+                  osd->height, 1);*/
   osd->line_bitmap =
     XCreatePixmap(osd->display, osd->window, osd->screen_width,
                   osd->line_height, osd->depth);
 
   osd->gc = XCreateGC(osd->display, osd->window, GCGraphicsExposures, &xgcv);
-  osd->mask_gc = XCreateGC(osd->display, osd->mask_bitmap, GCGraphicsExposures, &xgcv);
+  //xosd_xypos(osd);
+  /*copy back ground to the image*/
+  //printf("1 osd->screen_width=%d,osd->height=%d,osd->x=%d,osd->y=%d\n",osd->screen_width,osd->height,osd->x,osd->y);
+  //XCopyArea(osd->display, take_snapshot(osd), osd->line_bitmap, osd->gc,
+  //            0, 0, osd->screen_width, osd->height, 0, 0);
+
+/*  osd->mask_gc = XCreateGC(osd->display, osd->mask_bitmap, GCGraphicsExposures, &xgcv);
   osd->mask_gc_back = XCreateGC(osd->display, osd->mask_bitmap, GCGraphicsExposures, &xgcv);
 
   XSetBackground(osd->display, osd->gc,
@@ -841,10 +929,22 @@ xosd_create_xinerama(int number_lines, int xinerama_screen)
                  WhitePixel(osd->display, osd->screen));
   XSetBackground(osd->display, osd->mask_gc,
                  BlackPixel(osd->display, osd->screen));
+*/
+/*BEGIN For pango XFT support*/
+//osd->xftdrawable_msk = XftDrawCreate(osd->display, osd->mask_bitmap, osd->visual, DefaultColormap(osd->display, osd->screen));
+//if(!osd->xftdrawable_msk)
+//   printf("error, cannot create drawable_msk\n");
 
+
+osd->xftdrawable = XftDrawCreate(osd->display, osd->line_bitmap, osd->visual, DefaultColormap(osd->display, osd->screen));
+if(!osd->xftdrawable)
+   printf("error, cannot create drawable\n");
+/*END*/
 
   DEBUG(Dtrace, "setting colour");
   xosd_set_colour(osd, osd_default_colour);
+  xosd_set_shadow_colour(osd, osd_default_shadow_colour);
+  xosd_set_outline_colour(osd, osd_default_outline_colour);
 
   DEBUG(Dtrace, "stay on top");
   stay_on_top(osd->display, osd->window);
@@ -904,11 +1004,11 @@ xosd_destroy(xosd * osd)
 
   DEBUG(Dtrace, "freeing X resources");
   XFreeGC(osd->display, osd->gc);
-  XFreeGC(osd->display, osd->mask_gc);
-  XFreeGC(osd->display, osd->mask_gc_back);
+//  XFreeGC(osd->display, osd->mask_gc);
+//  XFreeGC(osd->display, osd->mask_gc_back);
   XFreePixmap(osd->display, osd->line_bitmap);
-  XFreeFontSet(osd->display, osd->fontset);
-  XFreePixmap(osd->display, osd->mask_bitmap);
+//  XFreeFontSet(osd->display, osd->fontset);
+//  XFreePixmap(osd->display, osd->mask_bitmap);
   XDestroyWindow(osd->display, osd->window);
 
   XCloseDisplay(osd->display);
@@ -1006,7 +1106,7 @@ union xosd_line newline = { type:LINE_blank };
     {
       struct xosd_bar *l = &newline.bar;
       ret = va_arg(a, int);
-      ret = MAX(0, MIN(ret, 100));
+      ret = (ret < 0) ? 0 : (ret > 100) ? 100 : ret;
       l->type = (command == XOSD_percentage) ? LINE_percentage : LINE_slider;
       l->value = ret;
       break;
@@ -1081,8 +1181,9 @@ xosd_set_colour(xosd * osd, const char *colour)
     return -1;
 
   _xosd_lock(osd);
+  retval = parse_xft_colour(osd, &osd->xftcolour, &osd->pixel, colour);
   retval = parse_colour(osd, &osd->colour, &osd->pixel, colour);
-  osd->update |= UPD_lines;
+   osd->update |= UPD_lines;
   _xosd_unlock(osd);
 
   return retval;
@@ -1101,6 +1202,8 @@ xosd_set_shadow_colour(xosd * osd, const char *colour)
     return -1;
 
   _xosd_lock(osd);
+  //printf("xosd_set_shadow_colour %s\n",colour);
+  retval = parse_xft_colour(osd, &osd->shadow_xftcolour, &osd->shadow_pixel, colour);
   retval = parse_colour(osd, &osd->shadow_colour, &osd->shadow_pixel, colour);
   osd->update |= UPD_lines;
   _xosd_unlock(osd);
@@ -1121,29 +1224,9 @@ xosd_set_outline_colour(xosd * osd, const char *colour)
     return -1;
 
   _xosd_lock(osd);
+  retval = parse_xft_colour(osd, &osd->outline_xftcolour, &osd->pixel, colour);
   retval =
     parse_colour(osd, &osd->outline_colour, &osd->outline_pixel, colour);
-  osd->update |= UPD_lines;
-  _xosd_unlock(osd);
-
-  return retval;
-}
-
-/* }}} */
-
-/* xosd_set_bbox_colour -- Change the colour of the bounding box {{{ */
-int
-xosd_set_bbox_colour(xosd * osd, const char *colour)
-{
-  int retval = 0;
-
-  FUNCTION_START(Dfunction);
-  if (osd == NULL)
-    return -1;
-
-  _xosd_lock(osd);
-  retval =
-    parse_colour(osd, &osd->bbox_colour, &osd->bbox_pixel, colour);
   osd->update |= UPD_lines;
   _xosd_unlock(osd);
 
@@ -1173,6 +1256,8 @@ xosd_set_font(xosd * osd, const char *font)
    * Try to create the new font. If it doesn't succeed, keep old font. 
    */
   _xosd_lock(osd);
+/*Mod by Waspee, for pango xft font*/
+/*
   fontset2 = XCreateFontSet(osd->display, font, &missing, &nmissing, &defstr);
   XFreeStringList(missing);
   if (fontset2 == NULL) {
@@ -1184,6 +1269,26 @@ xosd_set_font(xosd * osd, const char *font)
     osd->fontset = fontset2;
     osd->update |= UPD_font;
   }
+*/
+PangoFontMetrics *metrics;
+osd->pgc = pango_xft_get_context(osd->display, osd->screen);
+osd->pfd = pango_font_description_from_string(font);
+osd->update |= UPD_font;
+
+metrics = pango_context_get_metrics(osd->pgc, osd->pfd, pango_language_from_string(setlocale(LC_CTYPE, "")));
+//
+//dc.font.ascent  = pango_font_metrics_get_ascent(metrics) / PANGO_SCALE;
+//dc.font.descent = pango_font_metrics_get_descent(metrics) / PANGO_SCALE;
+
+// pango_font_metrics_unref(metrics);
+
+osd->plo = pango_layout_new(osd->pgc);
+pango_layout_set_font_description(osd->plo, osd->pfd);
+
+osd->xftascent = pango_font_metrics_get_ascent(metrics) / PANGO_SCALE ;
+osd->xftdescent = pango_font_metrics_get_descent(metrics) / PANGO_SCALE ;
+osd->xftheight = osd->xftascent + osd->xftdescent;
+//printf("osd->xftheight=%d\n",osd->xftheight);
   _xosd_unlock(osd);
 
   return ret;
@@ -1223,28 +1328,6 @@ xosd_set_outline_offset(xosd * osd, int outline_offset)
 
   _xosd_lock(osd);
   osd->outline_offset = outline_offset;
-  osd->margin = MAX(osd->outline_offset, osd->bbox_offset);
-  osd->update |= UPD_font;
-  _xosd_unlock(osd);
-
-  return 0;
-}
-
-/* }}} */
-
-/* xosd_set_bbox_offset -- Change the offset of the bounding box {{{ */
-int
-xosd_set_bbox_offset(xosd * osd, int bbox_offset)
-{
-  FUNCTION_START(Dfunction);
-  if (osd == NULL)
-    return -1;
-  if (bbox_offset < 0)
-    return -1;
-
-  _xosd_lock(osd);
-  osd->bbox_offset = bbox_offset;
-  osd->margin = MAX(osd->outline_offset, osd->bbox_offset);
   osd->update |= UPD_font;
   _xosd_unlock(osd);
 
